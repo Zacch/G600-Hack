@@ -1,8 +1,8 @@
 //! g600 — probe tool.
 //!
 //!   g600 list                            show the HID collections the mouse exposes
-//!   g600 dump                            decode all profiles (also saves a backup)
-//!   g600 set <1-3> <button> <combo> [--shift]
+//!   g600 dump [--raw]                    decode all profiles (also saves a backup)
+//!   g600 set <1-3> <button> <action> [--shift]
 //!                                        e.g. `g600 set 1 G9 Shift+W`; backs up first
 //!   g600 status                          active profile, DPI slot, busy flag
 //!   g600 select <1-3>                    make a profile active (+ apply its DPI)
@@ -14,8 +14,8 @@ use std::{fs, path::{Path, PathBuf}, process::ExitCode, time::SystemTime};
 
 use g600_core::{
     device::G600,
-    keys::parse_combo,
-    profile::{button_index, Button, Profile, BUTTON_NAMES, PROFILE_REPORT_LEN},
+    action::Action,
+    profile::{button_index, Profile, BUTTON_NAMES, PROFILE_REPORT_LEN},
     PROFILE_REPORT_IDS, REPORT_ID_ACTIVE,
 };
 use hidapi::HidApi;
@@ -66,17 +66,26 @@ fn backup(g: &G600) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn dump(api: &HidApi) -> Result<(), String> {
+fn dump(api: &HidApi, args: &[String]) -> Result<(), String> {
+    let raw = args.iter().any(|a| a == "--raw");
     let g = G600::open(api)?;
     println!("Opened {}\n", g.path);
-    match g.read_report(REPORT_ID_ACTIVE) {
-        Ok(b) => println!("Report 0x{REPORT_ID_ACTIVE:02X} (active profile / DPI), {} bytes:\n{}\n", b.len(), hex(&b)),
-        Err(e) => println!("Report 0x{REPORT_ID_ACTIVE:02X}: {e}\n"),
-    }
+    let s = g.status()?;
+    println!(
+        "Active profile {}, DPI slot {}, {} (0xF0 b1 = 0x{:02X})\n",
+        s.profile + 1,
+        s.resolution + 1,
+        if s.idle { "idle" } else { "BUSY" },
+        s.raw
+    );
     for (slot, &id) in PROFILE_REPORT_IDS.iter().enumerate() {
         let b = g.read_report(id).map_err(|e| format!("read 0x{id:02X}: {e}"))?;
-        println!("=== Profile {} (report 0x{id:02X}), {} bytes ===\n{}", slot + 1, b.len(), hex(&b));
-        match Profile::parse(&b) {
+        let marker = if slot == s.profile as usize { "  (active)" } else { "" };
+        println!("=== Profile {} (report 0x{id:02X}){marker} ===", slot + 1);
+        if raw {
+            println!("{}", hex(&b));
+        }
+        match Profile::decode(&b) {
             Ok(p) => println!("{}", p.summary()),
             Err(e) => println!("  decode failed: {e}\n"),
         }
@@ -86,15 +95,15 @@ fn dump(api: &HidApi) -> Result<(), String> {
 }
 
 fn set(api: &HidApi, args: &[String]) -> Result<(), String> {
-    let usage = "usage: g600 set <1-3> <button> <combo> [--shift]";
+    let usage = "usage: g600 set <1-3> <button> <action> [--shift]\n  \
+        action: Shift+W, LCtrl+F5, Mouse1-5, DpiUp, DpiDown, DpiCycle, ProfileCycle, DpiShift, GShift, Disabled";
     let shift = args.iter().any(|a| a == "--shift");
     let pos: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-    let [slot, button, combo] = pos.as_slice() else { return Err(usage.into()) };
+    let [slot, button, action] = pos.as_slice() else { return Err(usage.into()) };
     let slot: usize = slot.parse().ok().filter(|s| (1..=3).contains(s)).ok_or(usage)?;
     let index = button_index(button)
         .ok_or_else(|| format!("unknown button '{button}'; known: {}", BUTTON_NAMES.join(", ")))?;
-    let (modifier, key) = parse_combo(combo)?;
-    let new = Button { code: 0x00, modifier, key };
+    let new: Action = action.parse()?;
 
     let g = G600::open(api)?;
     let dir = backup(&g)?;
@@ -102,16 +111,18 @@ fn set(api: &HidApi, args: &[String]) -> Result<(), String> {
 
     let id = PROFILE_REPORT_IDS[slot - 1];
     let raw = g.read_report(id).map_err(|e| format!("read 0x{id:02X}: {e}"))?;
-    let profile = Profile::parse(&raw).map_err(|e| e.to_string())?;
-    let old = if shift { profile.shift_buttons[index] } else { profile.buttons[index] };
-    let data = profile.with_button(index, shift, new);
+    let mut profile = Profile::decode(&raw).map_err(|e| e.to_string())?;
+    let old = std::mem::replace(profile.button_mut(index, shift), new);
+    if old == new {
+        println!("Profile {slot}, {}: already {new}, nothing to write.", BUTTON_NAMES[index]);
+        return Ok(());
+    }
+    let data = profile.encode().map_err(|e| e.to_string())?;
 
     println!(
-        "Profile {slot}, {}{}: {} -> {}",
+        "Profile {slot}, {}{}: {old} -> {new}",
         BUTTON_NAMES[index],
         if shift { " (G-Shift)" } else { "" },
-        old.describe(),
-        new.describe()
     );
     report_write(g.write_profile(&data)?);
     Ok(())
@@ -147,7 +158,7 @@ fn select(api: &HidApi, args: &[String]) -> Result<(), String> {
     println!("Selected profile {p}; mouse reports active profile {}.", s.profile + 1);
     // Make the profile's stored default DPI slot take effect.
     let raw = g.read_report(PROFILE_REPORT_IDS[(p - 1) as usize]).map_err(|e| e.to_string())?;
-    if let Ok(prof) = Profile::parse(&raw) {
+    if let Ok(prof) = Profile::decode(&raw) {
         if (1..=4).contains(&prof.dpi_default) {
             g.apply_resolution(prof.dpi_default - 1)?;
             println!("Applied default DPI slot {}.", prof.dpi_default);
@@ -212,7 +223,7 @@ fn main() -> ExitCode {
     let rest = args.get(1..).unwrap_or(&[]);
     let result = match args.first().map(String::as_str) {
         Some("list") => list(&api),
-        Some("dump") => dump(&api),
+        Some("dump") => dump(&api, rest),
         Some("set") => set(&api, rest),
         Some("restore") => restore(&api, rest),
         Some("status") => status(&api),

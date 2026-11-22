@@ -3,3 +3,4 @@
 *.bin
 .idea/workspace.xml
 /Docs/EULA_files/
+!/crates/g600-core/tests/fixtures/*.bin

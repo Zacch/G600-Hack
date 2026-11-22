@@ -4,6 +4,7 @@
 //! Layout follows the community documentation in libratbag's
 //! `driver-logitech-g600.c`; verify against real dumps before writing.
 
+pub mod action;
 pub mod device;
 pub mod keys;
 pub mod profile;
