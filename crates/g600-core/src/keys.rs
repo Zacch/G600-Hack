@@ -79,3 +79,49 @@ mod tests {
         assert_eq!(modifier_names(0b0000_0011), vec!["LCtrl", "LShift"]);
     }
 }
+
+/// Parse a combo like "Shift+W", "LCtrl+LAlt+F5" or "Ctrl" into
+/// (modifier mask, key code). "Shift"/"Ctrl"/"Alt"/"Win" mean the left key.
+pub fn parse_combo(s: &str) -> Result<(u8, u8), String> {
+    let mut mods = 0u8;
+    let mut key = 0u8;
+    for part in s.split('+').map(str::trim) {
+        let alias = match part.to_ascii_lowercase().as_str() {
+            "shift" => Some(0x02),
+            "ctrl" | "control" => Some(0x01),
+            "alt" => Some(0x04),
+            "win" | "gui" => Some(0x08),
+            _ => None,
+        };
+        if let Some(bit) = alias.or_else(|| {
+            MOD_NAMES.iter().position(|m| m.eq_ignore_ascii_case(part)).map(|b| 1u8 << b)
+        }) {
+            mods |= bit;
+            continue;
+        }
+        if key != 0 {
+            return Err(format!("more than one non-modifier key in '{s}'"));
+        }
+        key = (1..=0xFFu8)
+            .find(|&c| key_name(c).eq_ignore_ascii_case(part))
+            .ok_or_else(|| format!("unknown key '{part}'"))?;
+    }
+    if mods == 0 && key == 0 {
+        return Err("empty combo".into());
+    }
+    Ok((mods, key))
+}
+
+#[cfg(test)]
+mod parse_tests {
+    use super::*;
+
+    #[test]
+    fn combos() {
+        assert_eq!(parse_combo("Shift+W"), Ok((0x02, 0x1A)));
+        assert_eq!(parse_combo("lctrl+lalt+f5"), Ok((0x05, 0x3E)));
+        assert_eq!(parse_combo("Space"), Ok((0, 0x2C)));
+        assert!(parse_combo("W+Q").is_err());
+        assert!(parse_combo("Foo").is_err());
+    }
+}

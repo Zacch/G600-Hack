@@ -105,6 +105,16 @@ impl Profile {
         })
     }
 
+    /// Return a copy of the raw report with one button entry replaced.
+    /// Every other byte stays exactly as read from the mouse.
+    pub fn with_button(&self, index: usize, g_shift: bool, btn: Button) -> Vec<u8> {
+        let base = if g_shift { SHIFT_BUTTONS_OFFSET } else { BUTTONS_OFFSET };
+        let o = base + index * 3;
+        let mut raw = self.raw.clone();
+        raw[o..o + 3].copy_from_slice(&[btn.code, btn.modifier, btn.key]);
+        raw
+    }
+
     pub fn summary(&self) -> String {
         let dpi: Vec<String> = self
             .dpi
@@ -149,5 +159,37 @@ mod tests {
     #[test]
     fn rejects_short() {
         assert!(Profile::parse(&[0xF3; 10]).is_err());
+    }
+}
+
+/// Look up a button by name ("G9", "g9", "Left", "G7"...).
+pub fn button_index(name: &str) -> Option<usize> {
+    BUTTON_NAMES.iter().position(|n| {
+        n.eq_ignore_ascii_case(name)
+            || n.split(['/', ' ']).next().is_some_and(|p| p.eq_ignore_ascii_case(name))
+    })
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+
+    #[test]
+    fn with_button_changes_only_three_bytes() {
+        let raw: Vec<u8> = (0..PROFILE_REPORT_LEN).map(|i| i as u8).collect();
+        let p = Profile::parse(&raw).unwrap();
+        let btn = Button { code: 0, modifier: 0x02, key: 0x1A };
+        let out = p.with_button(button_index("g9").unwrap(), false, btn);
+        let diff: Vec<usize> = (0..raw.len()).filter(|&i| raw[i] != out[i]).collect();
+        assert_eq!(diff, vec![55, 56, 57]); // 31 + 8*3
+        assert_eq!(Profile::parse(&out).unwrap().buttons[8], btn);
+    }
+
+    #[test]
+    fn button_lookup() {
+        assert_eq!(button_index("G9"), Some(8));
+        assert_eq!(button_index("left"), Some(0));
+        assert_eq!(button_index("Ring"), Some(5));
+        assert_eq!(button_index("G21"), None);
     }
 }
