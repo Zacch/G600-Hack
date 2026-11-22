@@ -24,6 +24,7 @@ pub const NUM_BUTTONS: usize = 20;
 const BUTTONS_OFFSET: usize = 31;
 const SHIFT_COLOR_OFFSET: usize = 91;
 const SHIFT_BUTTONS_OFFSET: usize = 94;
+const FACTORY_REPORT: &[u8] = include_bytes!("../tests/fixtures/original_F3.bin");
 
 /// Physical button names, in report order.
 pub const BUTTON_NAMES: [&str; NUM_BUTTONS] = [
@@ -143,6 +144,27 @@ impl Profile {
             b[o..o + 3].copy_from_slice(&a.encode());
         }
         Ok(b)
+    }
+
+    /// The mouse's original profile 1 (as dumped from this G600): left/right/
+    /// middle/back/forward, ring = G-Shift, G7 = Shift+B, G8 = profile cycle,
+    /// G9-G20 = 1..0,-,= and Ctrl+ those on the G-Shift layer, 1200 DPI.
+    /// Used as the template that configured profiles are built on.
+    pub fn factory() -> Profile {
+        Profile::decode(FACTORY_REPORT).expect("embedded factory profile is valid")
+    }
+
+    /// True if the normal (non-G-Shift) layer has a left click somewhere.
+    /// Never write a profile without one: the user could not click anymore.
+    pub fn has_left_click(&self) -> bool {
+        self.buttons.contains(&Action::Mouse(1))
+    }
+
+    /// The report bytes without the report id, for comparing profile
+    /// contents regardless of which slot they live in.
+    pub fn content(&self) -> Result<[u8; PROFILE_REPORT_LEN - 1], ProfileError> {
+        let b = self.encode()?;
+        Ok(b[1..].try_into().unwrap())
     }
 
     /// 0-based slot (0 = report 0xF3).

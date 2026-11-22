@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/g600-core", "crates/g600-cli"]
+members = ["crates/g600-core", "crates/g600-cli", "crates/g600-app"]
 
 [workspace.package]
 edition = "2021"
