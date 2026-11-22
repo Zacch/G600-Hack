@@ -1,0 +1,12 @@
+[package]
+name = "g600-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "g600"
+path = "src/main.rs"
+
+[dependencies]
+g600-core = { path = "../g600-core" }
+hidapi = "2"
