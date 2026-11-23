@@ -8,9 +8,7 @@
 // Release builds run without a console window; debug builds keep one for logs.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod config;
 mod foreground;
-mod slots;
 mod worker;
 
 use std::{
@@ -36,6 +34,7 @@ use windows::{
     },
 };
 
+use g600_app::config;
 use worker::{Msg, Paths, Worker};
 
 fn fatal(msg: &str) -> ! {
@@ -169,7 +168,15 @@ fn main() {
             if ev.id == *pause.id() {
                 let _ = tx.send(Msg::SetPaused(pause.is_checked()));
             } else if ev.id == *edit.id() {
-                let _ = Command::new("notepad.exe").arg(&config_path).spawn();
+                // Prefer the GUI editor next to this exe; fall back to Notepad.
+                let editor = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|d| d.join("g600-editor.exe")))
+                    .filter(|p| p.exists());
+                let spawned = editor.map(|e| Command::new(e).spawn().is_ok()).unwrap_or(false);
+                if !spawned {
+                    let _ = Command::new("notepad.exe").arg(&config_path).spawn();
+                }
             } else if ev.id == *reload.id() {
                 let _ = tx.send(Msg::Reload);
             } else if ev.id == *folder.id() {

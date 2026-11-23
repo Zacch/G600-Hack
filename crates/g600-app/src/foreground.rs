@@ -3,20 +3,14 @@
 
 use std::sync::{mpsc::Sender, OnceLock};
 
-use windows::{
-    core::PWSTR,
-    Win32::{
-        Foundation::{CloseHandle, HWND},
-        System::Threading::{
-            OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
-            PROCESS_QUERY_LIMITED_INFORMATION,
-        },
-        UI::{
-            Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK},
-            WindowsAndMessaging::{
-                GetForegroundWindow, GetWindowThreadProcessId, EVENT_SYSTEM_FOREGROUND,
-                WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
-            },
+use g600_app::apps::exe_of_window;
+use windows::Win32::{
+    Foundation::HWND,
+    UI::{
+        Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK},
+        WindowsAndMessaging::{
+            GetForegroundWindow, EVENT_SYSTEM_FOREGROUND, WINEVENT_OUTOFCONTEXT,
+            WINEVENT_SKIPOWNPROCESS,
         },
     },
 };
@@ -74,22 +68,3 @@ pub fn current() -> Option<String> {
     exe_of_window(unsafe { GetForegroundWindow() })
 }
 
-/// Exe file name ("notepad.exe") owning a window. None for windows of
-/// processes we may not query (e.g. elevated ones when we are not).
-fn exe_of_window(hwnd: HWND) -> Option<String> {
-    unsafe {
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        if pid == 0 {
-            return None;
-        }
-        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
-        let mut buf = [0u16; 1024];
-        let mut len = buf.len() as u32;
-        let r = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len);
-        let _ = CloseHandle(h);
-        r.ok()?;
-        let path = String::from_utf16_lossy(&buf[..len as usize]);
-        path.rsplit('\\').next().map(str::to_string)
-    }
-}

@@ -14,11 +14,13 @@ use std::{
 };
 
 use g600_core::{device::G600, profile::Profile, PROFILE_REPORT_IDS};
+
+use crate::foreground;
 use hidapi::HidApi;
 
-use crate::{
+use g600_app::{
     config::{Config, NamedProfile, DEFAULT_DEBOUNCE_MS},
-    foreground,
+
     slots::{Content, Plan, SlotState},
 };
 

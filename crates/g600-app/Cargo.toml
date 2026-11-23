@@ -3,12 +3,20 @@ name = "g600-app"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "g600-switcher"
 path = "src/main.rs"
 
+[[bin]]
+name = "g600-editor"
+path = "src/editor/main.rs"
+
 [dependencies]
 g600-core = { path = "../g600-core" }
+eframe = "0.37"
 hidapi = "2"
 serde = { version = "1", features = ["derive"] }
 toml = "1"
