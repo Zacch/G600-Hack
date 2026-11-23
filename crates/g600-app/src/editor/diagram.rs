@@ -29,27 +29,60 @@ pub struct Click {
 
 /// Top view. Returns a click on one of its buttons.
 pub fn top_view(ui: &mut Ui, v: &ButtonView) -> Option<Click> {
-    let (resp, painter) = ui.allocate_painter(vec2(520.0, 300.0), Sense::hover());
+    let (resp, painter) = ui.allocate_painter(vec2(520.0, 320.0), Sense::hover());
     let o = resp.rect.min;
     let at = |x: f32, y: f32| o + vec2(x, y);
     let visuals = ui.visuals().clone();
+    let line = Stroke::new(1.5, visuals.weak_text_color());
+    let groove = Stroke::new(2.0, visuals.weak_text_color());
 
-    // Body outline and wheel.
-    let body = Rect::from_min_max(at(205.0, 15.0), at(315.0, 290.0));
-    painter.rect(body, CornerRadius::same(50), visuals.extreme_bg_color, Stroke::new(1.5, visuals.weak_text_color()), StrokeKind::Inside);
-    painter.line_segment([at(260.0, 15.0), at(260.0, 110.0)], Stroke::new(1.0, visuals.weak_text_color()));
-    painter.rect_filled(Rect::from_center_size(at(260.0, 60.0), vec2(14.0, 34.0)), CornerRadius::same(6), visuals.weak_text_color());
+    // Shape traced from a top-view photo of the mouse (~540x1030 px; the
+    // cable enters at x=262, the front edge is at y=178). Coordinates below
+    // are photo pixels; `p` scales them onto the canvas.
+    const S: f32 = 0.33;
+    let p = |x: f32, y: f32| at(260.0 + (x - 262.0) * S, 10.0 + (y - 178.0) * S);
+
+    // Outline, front-centre first, then clockwise.
+    let contour = smooth_closed(
+        &[
+            (262.0, 178.0), (330.0, 180.0), (400.0, 190.0), (440.0, 205.0), (500.0, 250.0),
+            (530.0, 330.0), (536.0, 430.0), (534.0, 560.0), (530.0, 700.0), (516.0, 820.0),
+            (490.0, 900.0), (440.0, 968.0), (360.0, 1004.0), (262.0, 1014.0), (170.0, 1000.0),
+            (100.0, 960.0), (55.0, 880.0), (35.0, 790.0), (24.0, 680.0), (21.0, 560.0),
+            (24.0, 440.0), (34.0, 330.0), (60.0, 258.0), (110.0, 214.0), (180.0, 188.0),
+        ]
+        .map(|(x, y)| p(x, y)),
+        8,
+    );
+    fill_star_shaped(&painter, p(262.0, 560.0), &contour, visuals.extreme_bg_color);
+    painter.add(egui::Shape::closed_line(contour, line));
+
+    // Split between the left and right buttons (interrupted by wheel and G-keys).
+    for (a, b) in [((258.0, 180.0), (258.0, 264.0)), ((258.0, 380.0), (258.0, 398.0)), ((260.0, 540.0), (262.0, 594.0))] {
+        painter.line_segment([p(a.0, a.1), p(b.0, b.1)], line);
+    }
+    // Groove separating the ring-finger (G-Shift) button on the right.
+    painter.add(egui::Shape::line(
+        smooth_open(&[(432.0, 212.0), (430.0, 262.0), (426.0, 350.0), (418.0, 480.0), (408.0, 600.0), (398.0, 700.0)].map(|(x, y)| p(x, y)), 8),
+        groove,
+    ));
+    // Wheel, then G8 (front) and G7 (behind it).
+    let rect = |x0: f32, y0: f32, x1: f32, y1: f32| Rect::from_min_max(p(x0, y0), p(x1, y1));
+    painter.rect_filled(rect(229.0, 266.0, 287.0, 378.0), CornerRadius::same(8), visuals.weak_text_color());
+    for r in [rect(228.0, 400.0, 290.0, 456.0), rect(228.0, 462.0, 290.0, 538.0)] {
+        painter.rect_stroke(r, CornerRadius::same(4), line, StrokeKind::Inside);
+    }
 
     // (button index, dot on the body, box top-left)
     let layout: [(usize, Pos2, Pos2); 8] = [
-        (0, at(232.0, 45.0), at(10.0, 10.0)),    // Left
-        (3, at(250.0, 60.0), at(10.0, 70.0)),    // Tilt-L / Back
-        (6, at(260.0, 130.0), at(10.0, 130.0)),  // G7
-        (7, at(260.0, 160.0), at(10.0, 190.0)),  // G8
-        (2, at(260.0, 45.0), at(374.0, 10.0)),   // Middle
-        (1, at(288.0, 45.0), at(374.0, 70.0)),   // Right
-        (4, at(270.0, 60.0), at(374.0, 130.0)),  // Tilt-R / Forward
-        (5, at(313.0, 200.0), at(374.0, 190.0)), // Ring (G-Shift)
+        (0, p(150.0, 330.0), at(10.0, 10.0)),   // Left
+        (3, p(205.0, 338.0), at(10.0, 70.0)),   // Tilt-L / Back
+        (7, p(259.0, 428.0), at(10.0, 130.0)),  // G8 (front)
+        (6, p(259.0, 500.0), at(10.0, 190.0)),  // G7
+        (2, p(258.0, 300.0), at(374.0, 10.0)),  // Middle
+        (1, p(370.0, 330.0), at(374.0, 70.0)),  // Right
+        (4, p(311.0, 338.0), at(374.0, 130.0)), // Tilt-R / Forward
+        (5, p(475.0, 560.0), at(374.0, 190.0)), // Ring (G-Shift)
     ];
     let mut clicked = None;
     for (i, dot, top_left) in layout {
@@ -120,6 +153,59 @@ fn draw_box(ui: &mut Ui, painter: &egui::Painter, rect: Rect, i: usize, v: &Butt
     } else {
         None
     }
+}
+
+/// Catmull-Rom spline through `pts` (closed loop), `steps` points per segment.
+fn smooth_closed(pts: &[Pos2], steps: usize) -> Vec<Pos2> {
+    let n = pts.len();
+    (0..n)
+        .flat_map(|i| {
+            let p = |k: usize| pts[(i + n + k - 1) % n];
+            spline_segment(p(0), p(1), p(2), p(3), steps)
+        })
+        .collect()
+}
+
+/// Catmull-Rom spline through `pts` (open curve, ends included).
+fn smooth_open(pts: &[Pos2], steps: usize) -> Vec<Pos2> {
+    let n = pts.len();
+    let mut out: Vec<Pos2> = (0..n - 1)
+        .flat_map(|i| {
+            let p = |k: isize| pts[(i as isize + k).clamp(0, n as isize - 1) as usize];
+            spline_segment(p(-1), p(0), p(1), p(2), steps)
+        })
+        .collect();
+    out.push(pts[n - 1]);
+    out
+}
+
+/// Points from p1 towards p2 (p2 excluded) on a Catmull-Rom segment.
+fn spline_segment(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, steps: usize) -> Vec<Pos2> {
+    (0..steps)
+        .map(|s| {
+            let t = s as f32 / steps as f32;
+            let (t2, t3) = (t * t, t * t * t);
+            let f = |a: f32, b: f32, c: f32, d: f32| {
+                0.5 * (2.0 * b + (c - a) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2 + (3.0 * b - a - 3.0 * c + d) * t3)
+            };
+            pos2(f(p0.x, p1.x, p2.x, p3.x), f(p0.y, p1.y, p2.y, p3.y))
+        })
+        .collect()
+}
+
+/// Fill a closed outline that every point of which can be "seen" from
+/// `center` (egui only fills convex polygons on its own).
+fn fill_star_shaped(painter: &egui::Painter, center: Pos2, outline: &[Pos2], color: Color32) {
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(center, color);
+    for &p in outline {
+        mesh.colored_vertex(p, color);
+    }
+    let n = outline.len() as u32;
+    for k in 0..n {
+        mesh.add_triangle(0, 1 + k, 1 + (k + 1) % n);
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 fn ellipsize(s: &str, max: usize) -> String {
