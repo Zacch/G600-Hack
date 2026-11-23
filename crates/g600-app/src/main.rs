@@ -122,7 +122,9 @@ fn main() {
     // Started from a packaged app (e.g. the Claude desktop app)? Then Windows
     // redirects our %APPDATA% into that app's private folder, where other
     // programs (Notepad, Explorer) can't see the config.
-    let tip_prefix = match redirected_into_package(&base) {
+    // Check the file too: once the real folder exists, only the files inside
+    // may still resolve into the package folder.
+    let tip_prefix = match redirected_into_package(&base).or_else(|| redirected_into_package(&config_path)) {
         Some(pkg) => {
             let warn = MenuItem::new(
                 format!("⚠ Started from {pkg}: config is redirected there. Start the switcher from Explorer."),
