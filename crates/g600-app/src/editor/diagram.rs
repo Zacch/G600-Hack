@@ -1,6 +1,7 @@
 //! Our own schematic drawing of the G600 (no Logitech artwork): a top view
 //! with labelled boxes and leader lines, and the 3x4 thumb grid G9-G20.
-//! Each box shows the button name and its current action; click to select.
+//! Each box shows the button name and its current action. Left-click selects
+//! a button; right-click selects it and starts key capture.
 
 use eframe::egui::{self, pos2, vec2, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
 use g600_core::{action::Action, profile::BUTTON_NAMES};
@@ -10,12 +11,24 @@ pub struct ButtonView<'a> {
     /// Which buttons differ from the factory layout (highlighted).
     pub changed: [bool; 20],
     pub selected: Option<usize>,
+    /// Which layer this view shows (keeps widget ids apart).
+    pub shift: bool,
+    /// The selected button is waiting for a key press.
+    pub capturing: bool,
 }
 
 const BOX: egui::Vec2 = vec2(136.0, 42.0);
 
-/// Top view. Returns the index of a clicked button.
-pub fn top_view(ui: &mut Ui, v: &ButtonView) -> Option<usize> {
+/// A click on a button box.
+#[derive(Clone, Copy)]
+pub struct Click {
+    pub button: usize,
+    /// Right-click: start key capture.
+    pub capture: bool,
+}
+
+/// Top view. Returns a click on one of its buttons.
+pub fn top_view(ui: &mut Ui, v: &ButtonView) -> Option<Click> {
     let (resp, painter) = ui.allocate_painter(vec2(520.0, 300.0), Sense::hover());
     let o = resp.rect.min;
     let at = |x: f32, y: f32| o + vec2(x, y);
@@ -44,15 +57,15 @@ pub fn top_view(ui: &mut Ui, v: &ButtonView) -> Option<usize> {
         let anchor = if top_left.x < dot.x { rect.right_center() } else { rect.left_center() };
         painter.line_segment([anchor, dot], Stroke::new(1.0, visuals.weak_text_color()));
         painter.circle_filled(dot, 3.5, visuals.text_color());
-        if draw_box(ui, &painter, rect, i, v) {
-            clicked = Some(i);
+        if let Some(c) = draw_box(ui, &painter, rect, i, v) {
+            clicked = Some(c);
         }
     }
     clicked
 }
 
-/// Thumb grid G9-G20 (3 columns x 4 rows, as on the mouse). Returns a clicked button.
-pub fn side_view(ui: &mut Ui, v: &ButtonView) -> Option<usize> {
+/// Thumb grid G9-G20 (3 columns x 4 rows, as on the mouse). Returns a click on one of its buttons.
+pub fn side_view(ui: &mut Ui, v: &ButtonView) -> Option<Click> {
     let gap = 8.0;
     let size = vec2(3.0 * BOX.x + 2.0 * gap + 24.0, 4.0 * BOX.y + 3.0 * gap + 24.0);
     let (resp, painter) = ui.allocate_painter(size, Sense::hover());
@@ -63,15 +76,15 @@ pub fn side_view(ui: &mut Ui, v: &ButtonView) -> Option<usize> {
         let (row, col) = (n / 3, n % 3);
         let min = resp.rect.min + vec2(12.0 + col as f32 * (BOX.x + gap), 12.0 + row as f32 * (BOX.y + gap));
         let i = 8 + n; // G9 is index 8
-        if draw_box(ui, &painter, Rect::from_min_size(min, BOX), i, v) {
-            clicked = Some(i);
+        if let Some(c) = draw_box(ui, &painter, Rect::from_min_size(min, BOX), i, v) {
+            clicked = Some(c);
         }
     }
     clicked
 }
 
-fn draw_box(ui: &mut Ui, painter: &egui::Painter, rect: Rect, i: usize, v: &ButtonView) -> bool {
-    let resp = ui.interact(rect, egui::Id::unique(("g600-button", i)), Sense::click());
+fn draw_box(ui: &mut Ui, painter: &egui::Painter, rect: Rect, i: usize, v: &ButtonView) -> Option<Click> {
+    let resp = ui.interact(rect, egui::Id::unique(("g600-button", v.shift, i)), Sense::click());
     let visuals = ui.visuals();
     let selected = v.selected == Some(i);
     let fill = if selected {
@@ -95,11 +108,18 @@ fn draw_box(ui: &mut Ui, painter: &egui::Painter, rect: Rect, i: usize, v: &Butt
     painter.text(
         pos2(rect.min.x + 8.0, rect.max.y - 5.0),
         Align2::LEFT_BOTTOM,
-        ellipsize(&v.actions[i].to_string(), 20),
+        if selected && v.capturing { "press a key…".to_string() } else { ellipsize(&v.actions[i].to_string(), 20) },
         FontId::proportional(14.0),
         if v.changed[i] && !selected { Color32::from_rgb(0x40, 0xC0, 0x70) } else { text },
     );
-    resp.on_hover_text(format!("{name}: {}", v.actions[i])).clicked()
+    let resp = resp.on_hover_text(format!("{name}: {}\nRight-click to capture a key", v.actions[i]));
+    if resp.secondary_clicked() {
+        Some(Click { button: i, capture: true })
+    } else if resp.clicked() {
+        Some(Click { button: i, capture: false })
+    } else {
+        None
+    }
 }
 
 fn ellipsize(s: &str, max: usize) -> String {

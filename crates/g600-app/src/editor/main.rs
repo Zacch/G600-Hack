@@ -333,37 +333,65 @@ impl Editor {
             }
         });
         let factory = Profile::factory();
-        let (actions, base) = if self.shift_layer {
-            (effective.shift_buttons, factory.shift_buttons)
-        } else {
-            (effective.buttons, factory.buttons)
+        let make_view = |shift: bool| {
+            let (actions, base) =
+                if shift { (&effective.shift_buttons, &factory.shift_buttons) } else { (&effective.buttons, &factory.buttons) };
+            diagram::ButtonView {
+                actions,
+                changed: std::array::from_fn(|i| actions[i] != base[i]),
+                selected: if shift == self.shift_layer { self.button } else { None },
+                shift,
+                capturing: self.capturing,
+            }
         };
-        let view = diagram::ButtonView {
-            actions: &actions,
-            changed: std::array::from_fn(|i| actions[i] != base[i]),
-            selected: self.button,
-        };
-        let mut clicked = None;
+        let (normal, gshift) = (make_view(false), make_view(true));
+        let top = if self.shift_layer { &gshift } else { &normal };
+        ui.label(
+            RichText::new("Click a button to edit it. Right-click a button, then press a key (with Ctrl/Shift/Alt) to set it quickly.")
+                .small()
+                .weak(),
+        );
+        // (click, layer) of a click in any of the views.
+        let mut clicked: Option<(diagram::Click, bool)> = None;
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
-                ui.label(RichText::new("Top").weak());
-                clicked = clicked.or(diagram::top_view(ui, &view));
+                let layer = if self.shift_layer { "G-Shift layer" } else { "normal layer" };
+                ui.label(RichText::new(format!("Top ({layer})")).weak());
+                clicked = clicked.or(diagram::top_view(ui, top).map(|c| (c, self.shift_layer)));
             });
             ui.add_space(12.0);
             ui.vertical(|ui| {
                 ui.label(RichText::new("Thumb buttons").weak());
-                clicked = clicked.or(diagram::side_view(ui, &view));
+                clicked = clicked.or(diagram::side_view(ui, &normal).map(|c| (c, false)));
+                ui.add_space(6.0);
+                ui.label(RichText::new("Thumb buttons, G-Shift layer").weak());
+                clicked = clicked.or(diagram::side_view(ui, &gshift).map(|c| (c, true)));
             });
         });
-        if let Some(i) = clicked {
+        if let Some((c, shift)) = clicked {
+            let i = c.button;
             self.button = Some(i);
-            self.capturing = false;
-            self.draft = None;
+            self.shift_layer = shift;
             self.key_text.clear();
+            self.capturing = c.capture;
+            self.draft = None;
+            if c.capture {
+                // Open the Key editor in capture mode; the next key press is stored.
+                let current = if shift { effective.shift_buttons[i] } else { effective.buttons[i] };
+                self.draft = Some(match current {
+                    Action::Key { .. } => current,
+                    _ => Action::Key { modifiers: 0, key: 0 },
+                });
+            }
         }
         ui.separator();
         if let Some(i) = self.button {
-            self.button_editor(ui, i, actions[i], base[i]);
+            let (current, base) = if self.shift_layer {
+                (effective.shift_buttons[i], factory.shift_buttons[i])
+            } else {
+                (effective.buttons[i], factory.buttons[i])
+            };
+            self.button_editor(ui, i, current, base);
         }
 
         if !problems.is_empty() {
